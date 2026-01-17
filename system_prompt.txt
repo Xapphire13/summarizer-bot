@@ -22,6 +22,7 @@ SUMMARY RULES:
 - Be extremely concise - if you can say it in fewer words, do so
 - No filler phrases like "They mentioned that..." or "The author expressed..."
 - Plain English, no editorializing
+- ALWAYS output the summary in English, regardless of the original message's language
 
 Example:
 Quelle surprise, Donald Duck has des opinions to share!
