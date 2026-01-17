@@ -6,11 +6,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=<YOUR_USER>
-WorkingDirectory=/home/<YOUR_USER>/summarizer-bot
-ExecStart=/home/<YOUR_USER>/summarizer-bot/summarizer-bot
+WorkingDirectory=/opt/summarizer-bot
+ExecStart=/opt/summarizer-bot/summarizer-bot
 Restart=on-failure
 RestartSec=5
-EnvironmentFile=/home/<YOUR_USER>/summarizer-bot/.env
+EnvironmentFile=/opt/summarizer-bot/.env
 
 [Install]
 WantedBy=multi-user.target

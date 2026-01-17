@@ -14,9 +14,9 @@ struct Handler {
     ollama_client: Ollama,
     llm_model: String,
     // Messages at least this long are summarized
-    message_length_threshold: usize,
+    message_length_min: usize,
     // Messages longer than this are not summarized
-    message_length_limit: usize,
+    message_length_max: usize,
 }
 
 #[async_trait]
@@ -27,8 +27,8 @@ impl EventHandler for Handler {
             return;
         }
 
-        if msg.content.len() >= self.message_length_threshold
-            && msg.content.len() <= self.message_length_limit
+        if msg.content.len() >= self.message_length_min
+            && msg.content.len() <= self.message_length_max
         {
             let mut response = match msg
                 .channel_id
@@ -115,16 +115,16 @@ async fn main() -> Result<()> {
     let handler = Handler {
         ollama_client,
         llm_model: env::var("LLM_MODEL").context("Expected LLM_MODEL in environment")?,
-        message_length_threshold: env::var("MESSAGE_LENGTH_THRESHOLD")
-            .context("Expected MESSAGE_LENGTH_THRESHOLD in environment")?
+        message_length_min: env::var("MESSAGE_LENGTH_MIN")
+            .context("Expected MESSAGE_LENGTH_MIN in environment")?
             .parse()?,
-        message_length_limit: env::var("MESSAGE_LENGTH_LIMIT")
-            .context("Expected MESSAGE_LENGTH_LIMIT in environment")?
+        message_length_max: env::var("MESSAGE_LENGTH_MAX")
+            .context("Expected MESSAGE_LENGTH_MAX in environment")?
             .parse()?,
     };
 
-    if handler.message_length_threshold > handler.message_length_limit {
-        panic!("MESSAGE_LENGTH_THRESHOLD must be <= MESSAGE_LENGTH_LIMIT");
+    if handler.message_length_min > handler.message_length_max {
+        panic!("MESSAGE_LENGTH_MIN must be <= MESSAGE_LENGTH_MAX");
     }
 
     let mut client = Client::builder(&token, intents)
