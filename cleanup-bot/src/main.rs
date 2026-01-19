@@ -8,7 +8,7 @@ async fn main() -> Result<()> {
 
     let config = shared::load_bot_config!()?;
 
-    let intents = GatewayIntents::empty();
+    let intents = GatewayIntents::MESSAGE_CONTENT | GatewayIntents::GUILD_MESSAGES;
 
     let mut client = Client::builder(&config.discord_token, intents)
         // .event_handler(handler)
