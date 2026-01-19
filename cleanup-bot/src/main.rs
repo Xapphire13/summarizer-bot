@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use ::tracing::error;
 use anyhow::{Context, Result};
@@ -18,7 +18,7 @@ mod config;
 async fn main() -> Result<()> {
     shared::init_tracing!()?;
     let bot_config = shared::load_bot_config!()?;
-    let config = Arc::from(Config::load()?);
+    let config = Arc::new(Mutex::new(Config::load()?));
     let intents = GatewayIntents::MESSAGE_CONTENT | GatewayIntents::GUILD_MESSAGES;
 
     let framework = poise::Framework::builder()

@@ -1,11 +1,11 @@
 use anyhow::Result;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serenity::all::ChannelId;
 use std::{collections::HashMap, fs};
 
 const CONFIG_PATH: &'static str = "./config.toml";
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ChannelConfig {
     pub name: String,
     /// Override for the global retention policy
@@ -19,12 +19,12 @@ impl ChannelConfig {
     }
 }
 
-#[derive(Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct RetentionConfig {
     default_policy_days: u32,
 }
 
-#[derive(Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Config {
     retention: RetentionConfig,
     #[serde(default)]
@@ -40,5 +40,25 @@ impl Config {
         };
 
         Ok(config)
+    }
+
+    pub fn save(&self) -> Result<()> {
+        fs::write(CONFIG_PATH, toml::to_string_pretty(&self)?)?;
+
+        Ok(())
+    }
+
+    pub fn add_channel_config(
+        &mut self,
+        channel_id: ChannelId,
+        config: ChannelConfig,
+    ) -> Result<()> {
+        self.channels.insert(channel_id, config);
+        self.save()
+    }
+
+    pub fn remove_channel(&mut self, channel_id: ChannelId) -> Result<()> {
+        self.channels.remove(&channel_id);
+        self.save()
     }
 }
