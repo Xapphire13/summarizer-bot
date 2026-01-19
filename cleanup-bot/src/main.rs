@@ -1,17 +1,24 @@
+use std::sync::Arc;
+
 use ::tracing::error;
 use anyhow::{Context, Result};
 use poise::samples::register_in_guild;
 use serenity::{Client, all::GatewayIntents};
 use tracing::info;
 
-use crate::command::cleanup;
+use crate::{
+    command::{UserData, cleanup},
+    config::Config,
+};
 
 mod command;
+mod config;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     shared::init_tracing!()?;
-    let config = shared::load_bot_config!()?;
+    let bot_config = shared::load_bot_config!()?;
+    let config = Arc::from(Config::load()?);
     let intents = GatewayIntents::MESSAGE_CONTENT | GatewayIntents::GUILD_MESSAGES;
 
     let framework = poise::Framework::builder()
@@ -27,12 +34,12 @@ async fn main() -> Result<()> {
                     register_in_guild(ctx, &framework.options().commands, guild_id.id).await?;
                 }
 
-                Ok(())
+                Ok(UserData { config })
             })
         })
         .build();
 
-    let mut client = Client::builder(&config.discord_token, intents)
+    let mut client = Client::builder(&bot_config.discord_token, intents)
         .framework(framework)
         .await
         .context("Error creating client")?;
