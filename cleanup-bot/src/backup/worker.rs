@@ -8,24 +8,24 @@ use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
 use super::queue::BackupQueue;
+use crate::cloud_storage::CloudStorage;
 use crate::config::BackupWorkerConfig;
-use crate::onedrive::OneDriveClient;
 
 /// Spawn the background backup worker.
 pub fn spawn_worker(
     queue: Arc<Mutex<BackupQueue>>,
     config: BackupWorkerConfig,
-    onedrive_client: Arc<OneDriveClient>,
+    cloud_storage: Arc<dyn CloudStorage>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        run_worker(queue, config, onedrive_client).await;
+        run_worker(queue, config, cloud_storage).await;
     })
 }
 
 async fn run_worker(
     queue: Arc<Mutex<BackupQueue>>,
     config: BackupWorkerConfig,
-    onedrive_client: Arc<OneDriveClient>,
+    cloud_storage: Arc<dyn CloudStorage>,
 ) {
     let check_interval = Duration::from_secs(config.check_interval_seconds);
     let mut interval = interval(check_interval);
@@ -94,7 +94,7 @@ async fn run_worker(
             }
 
             // Attempt upload
-            match upload_to_cloud(&local_path, onedrive_client.deref()).await {
+            match upload_to_cloud(&local_path, cloud_storage.deref()).await {
                 Ok(()) => {
                     info!("Successfully uploaded {}", local_path.display());
 
@@ -143,7 +143,7 @@ async fn run_worker(
 }
 
 /// Upload file to cloud storage.
-async fn upload_to_cloud(local_path: &Path, client: &OneDriveClient) -> Result<(), String> {
+async fn upload_to_cloud(local_path: &Path, client: &dyn CloudStorage) -> Result<(), String> {
     client
         .upload_file(local_path)
         .await

@@ -7,7 +7,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
-use super::OneDriveError;
+use crate::cloud_storage::CloudStorageError;
 
 const TOKENS_PATH: &str = "./onedrive_tokens.toml";
 const AUTH_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0";
@@ -75,13 +75,13 @@ impl TokenStore {
         }
     }
 
-    fn save_tokens(&self) -> Result<(), OneDriveError> {
+    fn save_tokens(&self) -> Result<(), CloudStorageError> {
         let Some(tokens) = &self.tokens else {
             return Ok(());
         };
 
         let content = toml::to_string_pretty(tokens)
-            .map_err(|e| OneDriveError::TokenStorage(e.to_string()))?;
+            .map_err(|e| CloudStorageError::TokenStorage(e.to_string()))?;
 
         fs::write(TOKENS_PATH, content)?;
         Ok(())
@@ -92,9 +92,9 @@ impl TokenStore {
     }
 
     /// Get a valid access token, refreshing if necessary.
-    pub async fn get_valid_token(&mut self) -> Result<String, OneDriveError> {
+    pub async fn get_valid_token(&mut self) -> Result<String, CloudStorageError> {
         let Some(tokens) = &self.tokens else {
-            return Err(OneDriveError::Auth("No tokens available".to_string()));
+            return Err(CloudStorageError::Auth("No tokens available".to_string()));
         };
 
         // Check if token is expired (with 5 minute buffer)
@@ -110,7 +110,7 @@ impl TokenStore {
     }
 
     /// Perform device code flow for initial authentication.
-    pub async fn device_code_flow(&mut self) -> Result<(), OneDriveError> {
+    pub async fn device_code_flow(&mut self) -> Result<(), CloudStorageError> {
         // Request device code
         let resp = self
             .http
@@ -124,7 +124,7 @@ impl TokenStore {
 
         if !resp.status().is_success() {
             let error: ErrorResponse = resp.json().await?;
-            return Err(OneDriveError::Auth(
+            return Err(CloudStorageError::Auth(
                 error.error_description.unwrap_or(error.error),
             ));
         }
@@ -142,7 +142,7 @@ impl TokenStore {
 
         loop {
             if std::time::Instant::now() > deadline {
-                return Err(OneDriveError::Auth("Device code expired".to_string()));
+                return Err(CloudStorageError::Auth("Device code expired".to_string()));
             }
 
             tokio::time::sleep(poll_interval).await;
@@ -181,7 +181,7 @@ impl TokenStore {
                     continue;
                 }
                 _ => {
-                    return Err(OneDriveError::Auth(
+                    return Err(CloudStorageError::Auth(
                         error.error_description.unwrap_or(error.error),
                     ));
                 }
@@ -190,12 +190,12 @@ impl TokenStore {
     }
 
     /// Refresh the access token using the refresh token.
-    async fn refresh_token(&mut self) -> Result<(), OneDriveError> {
+    async fn refresh_token(&mut self) -> Result<(), CloudStorageError> {
         let refresh_token = self
             .tokens
             .as_ref()
             .map(|t| t.refresh_token.clone())
-            .ok_or_else(|| OneDriveError::Auth("No refresh token available".to_string()))?;
+            .ok_or_else(|| CloudStorageError::Auth("No refresh token available".to_string()))?;
 
         let resp = self
             .http
@@ -210,7 +210,7 @@ impl TokenStore {
 
         if !resp.status().is_success() {
             let error: ErrorResponse = resp.json().await?;
-            return Err(OneDriveError::Auth(
+            return Err(CloudStorageError::Auth(
                 error.error_description.unwrap_or(error.error),
             ));
         }
