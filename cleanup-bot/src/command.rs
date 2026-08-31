@@ -7,7 +7,7 @@ use indoc::formatdoc;
 use serenity::all::{
     ButtonStyle, ComponentInteractionCollector, CreateActionRow, CreateButton,
     CreateInteractionResponse, CreateInteractionResponseMessage, EditInteractionResponse,
-    Mentionable, User,
+    Mentionable, UserId, parse_user_mention,
 };
 
 use crate::cancellation::CancellationRegistry;
@@ -24,6 +24,14 @@ pub struct CommandData {
 }
 
 type Context<'a> = poise::Context<'a, CommandData, Error>;
+
+/// Parse a user ID from either a raw numeric ID or a `<@id>`/`<@!id>` mention,
+/// so users who've left the server (and thus can't be picked via Discord's
+/// user-option autocomplete) can still be targeted.
+fn parse_user_id(input: &str) -> Option<UserId> {
+    let trimmed = input.trim();
+    parse_user_mention(trimmed).or_else(|| trimmed.parse().ok())
+}
 
 #[poise::command(slash_command, subcommands("enable", "disable", "purge_user"))]
 pub async fn cleanup(_ctx: Context<'_>) -> Result<()> {
@@ -91,18 +99,33 @@ pub async fn disable(ctx: Context<'_>) -> Result<()> {
 )]
 pub async fn purge_user(
     ctx: Context<'_>,
-    #[description = "Delete all messages from this user in the channel"] user: User,
+    #[description = "User ID or @mention to purge (works even if they've left the server)"]
+    user: String,
 ) -> Result<()> {
+    let Some(user_id) = parse_user_id(&user) else {
+        ctx.send(
+            poise::CreateReply::default()
+                .ephemeral(true)
+                .content("That doesn't look like a valid user ID or mention."),
+        )
+        .await?;
+        return Ok(());
+    };
+
     ctx.defer_ephemeral().await?;
 
     let channel_id = ctx.channel_id();
-    let message_ids = find_messages_by_user(ctx.http(), channel_id, user.id).await?;
+    let message_ids = find_messages_by_user(ctx.http(), channel_id, user_id).await?;
 
     if message_ids.is_empty() {
-        ctx.say(format!(
-            "No messages found from {} in this channel.",
-            user.mention()
-        ))
+        ctx.send(
+            poise::CreateReply::default()
+                .ephemeral(true)
+                .content(format!(
+                    "No messages found from {} in this channel.",
+                    user_id.mention()
+                )),
+        )
         .await?;
         return Ok(());
     }
@@ -120,7 +143,7 @@ pub async fn purge_user(
                     Delete them? This cannot be undone.
                     ",
                     count = message_ids.len(),
-                    user = user.mention(),
+                    user = user_id.mention(),
                     channel = channel_id.mention(),
                 })
                 .components(vec![CreateActionRow::Buttons(vec![
@@ -222,7 +245,7 @@ pub async fn purge_user(
             EditInteractionResponse::new().content(format!(
                 "Deleted {} message(s) from {}.",
                 jobs.len(),
-                user.mention()
+                user_id.mention()
             )),
         )
         .await?;
