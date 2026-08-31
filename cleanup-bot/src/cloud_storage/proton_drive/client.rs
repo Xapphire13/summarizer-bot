@@ -9,6 +9,10 @@ use tracing::{debug, info};
 use crate::cloud_storage::{CloudStorage, CloudStorageError, build_relative_remote_path};
 
 const CLI_BIN: &str = "proton-drive";
+/// Proton Drive's fixed top-level section for user files. All destination
+/// paths live under this, and it isn't configurable — the config's
+/// `upload_folder` stays backend-independent, so this prefix is applied here.
+const DRIVE_ROOT: &str = "/my-files";
 
 #[derive(Deserialize)]
 struct Node {
@@ -108,7 +112,10 @@ impl CloudStorage for ProtonDriveClient {
         let (date_folder, _file_name) = relative_path
             .rsplit_once('/')
             .expect("relative remote path always contains a date-based folder segment");
-        let remote_folder = format!("{}/{date_folder}", self.upload_folder.trim_end_matches('/'));
+        let remote_folder = format!(
+            "{DRIVE_ROOT}/{}/{date_folder}",
+            self.upload_folder.trim_matches('/'),
+        );
 
         info!("Uploading {} to {remote_folder}", local_path.display());
 
