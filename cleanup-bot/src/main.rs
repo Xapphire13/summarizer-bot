@@ -10,18 +10,18 @@ use crate::{
     backup::BackupQueue,
     cancellation::CancellationRegistry,
     cleanup::spawn_worker,
+    cloud_storage::{CloudStorage, OneDriveClient, ProtonDriveClient, TokenStore},
     command::{CommandData, cleanup},
-    config::{Config, ConfigStore},
-    onedrive::{OneDriveClient, TokenStore},
+    config::{CloudStorageBackendConfig, Config, ConfigStore},
 };
 
 mod backup;
 mod cancellation;
 mod cleanup;
+mod cloud_storage;
 mod command;
 mod config;
 mod media;
-mod onedrive;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -29,31 +29,37 @@ async fn main() -> Result<()> {
     let bot_config = shared::load_bot_config!()?;
     let config = Config::load()?;
     let backup_worker_config = config.media_backup.worker.clone();
-    let onedrive_config = config.onedrive.clone();
+    let cloud_backup_config = config.cloud_backup.clone();
     let config_store = ConfigStore::new(config);
     let backup_queue = Arc::new(Mutex::new(BackupQueue::load()?));
     let cancellation = Arc::new(Mutex::new(CancellationRegistry::new()));
     let intents = GatewayIntents::MESSAGE_CONTENT | GatewayIntents::GUILD_MESSAGES;
 
-    // Initialize OneDrive client if configured
-    let onedrive_client = if let Some(od_config) = onedrive_config {
-        let token_store = Arc::new(TokioMutex::new(TokenStore::new(
-            od_config.client_id.clone(),
-        )));
+    // Initialize the cloud storage client if a backend is configured
+    let cloud_storage: Option<Arc<dyn CloudStorage>> = match cloud_backup_config {
+        Some(cloud_config) => match cloud_config.backend {
+            CloudStorageBackendConfig::OneDrive { client_id } => {
+                let token_store = Arc::new(TokioMutex::new(TokenStore::new(client_id)));
 
-        // Check if we need to authenticate
-        if !token_store.lock().await.has_tokens() {
-            info!("OneDrive tokens not found, starting device code flow...");
-            token_store.lock().await.device_code_flow().await?;
+                // Check if we need to authenticate
+                if !token_store.lock().await.has_tokens() {
+                    info!("OneDrive tokens not found, starting device code flow...");
+                    token_store.lock().await.device_code_flow().await?;
+                }
+
+                Some(Arc::new(OneDriveClient::new(
+                    token_store,
+                    cloud_config.upload_folder,
+                )))
+            }
+            CloudStorageBackendConfig::ProtonDrive => {
+                Some(Arc::new(ProtonDriveClient::new(cloud_config.upload_folder)))
+            }
+        },
+        None => {
+            info!("Cloud storage not configured, backups will be stored locally only");
+            None
         }
-
-        Some(Arc::new(OneDriveClient::new(
-            token_store,
-            od_config.upload_folder,
-        )))
-    } else {
-        info!("OneDrive not configured, backups will be stored locally only");
-        None
     };
 
     let framework = poise::Framework::builder()
@@ -76,11 +82,11 @@ async fn main() -> Result<()> {
                     }
 
                     // Spawn the backup worker (only if we have somewhere to back up to)
-                    if let Some(onedrive_client) = onedrive_client {
+                    if let Some(cloud_storage) = cloud_storage {
                         backup::spawn_worker(
                             Arc::clone(&backup_queue),
                             backup_worker_config,
-                            onedrive_client,
+                            cloud_storage,
                         );
                     }
 

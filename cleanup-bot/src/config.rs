@@ -17,11 +17,22 @@ fn default_upload_folder() -> String {
     "/discord-backups".to_string()
 }
 
+/// Cloud storage backend selection and any auth params it needs.
+/// Settings that apply regardless of backend (e.g. `upload_folder`) live on
+/// `CloudBackupConfig` instead.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct OneDriveConfig {
-    pub client_id: String,
+#[serde(tag = "backend", rename_all = "snake_case")]
+pub enum CloudStorageBackendConfig {
+    OneDrive { client_id: String },
+    ProtonDrive,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CloudBackupConfig {
     #[serde(default = "default_upload_folder")]
     pub upload_folder: String,
+    #[serde(flatten)]
+    pub backend: CloudStorageBackendConfig,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -93,7 +104,7 @@ pub struct Config {
     pub retention: RetentionConfig,
     pub media_backup: MediaBackupConfig,
     #[serde(default)]
-    pub onedrive: Option<OneDriveConfig>,
+    pub cloud_backup: Option<CloudBackupConfig>,
     #[serde(default)]
     channels: HashMap<ChannelId, ChannelConfig>,
 }
