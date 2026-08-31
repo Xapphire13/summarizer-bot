@@ -208,7 +208,7 @@ async fn run_cleanup(
 }
 
 /// Delete non-media messages with rate limiting.
-async fn delete_messages(
+pub(crate) async fn delete_messages(
     http: &Http,
     channel_id: ChannelId,
     jobs: &[DeleteJob],

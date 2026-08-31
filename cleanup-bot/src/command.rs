@@ -1,12 +1,22 @@
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{Error, Result};
 use indoc::formatdoc;
-use serenity::all::Mentionable;
+use serenity::all::{
+    ButtonStyle, ComponentInteractionCollector, CreateActionRow, CreateButton,
+    CreateInteractionResponse, CreateInteractionResponseMessage, EditInteractionResponse,
+    Mentionable, User,
+};
 
 use crate::cancellation::CancellationRegistry;
+use crate::cleanup::purge::find_messages_by_user;
+use crate::cleanup::queue::DeleteJob;
+use crate::cleanup::task::delete_messages;
 use crate::config::{ChannelConfig, ConfigStore};
+
+const CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct CommandData {
     pub config: ConfigStore,
@@ -15,7 +25,7 @@ pub struct CommandData {
 
 type Context<'a> = poise::Context<'a, CommandData, Error>;
 
-#[poise::command(slash_command, subcommands("enable", "disable"))]
+#[poise::command(slash_command, subcommands("enable", "disable", "purge_user"))]
 pub async fn cleanup(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
@@ -71,5 +81,151 @@ pub async fn disable(ctx: Context<'_>) -> Result<()> {
     }
 
     ctx.say(message).await?;
+    Ok(())
+}
+
+#[poise::command(
+    slash_command,
+    rename = "purge-user",
+    required_permissions = "MANAGE_MESSAGES"
+)]
+pub async fn purge_user(
+    ctx: Context<'_>,
+    #[description = "Delete all messages from this user in the channel"] user: User,
+) -> Result<()> {
+    ctx.defer_ephemeral().await?;
+
+    let channel_id = ctx.channel_id();
+    let message_ids = find_messages_by_user(ctx.http(), channel_id, user.id).await?;
+
+    if message_ids.is_empty() {
+        ctx.say(format!(
+            "No messages found from {} in this channel.",
+            user.mention()
+        ))
+        .await?;
+        return Ok(());
+    }
+
+    let ctx_id = ctx.id();
+    let confirm_id = format!("purge-user-confirm-{ctx_id}");
+    let cancel_id = format!("purge-user-cancel-{ctx_id}");
+
+    let reply = ctx
+        .send(
+            poise::CreateReply::default()
+                .ephemeral(true)
+                .content(formatdoc! {"
+                    Found **{count}** message(s) from {user} in {channel}.
+                    Delete them? This cannot be undone.
+                    ",
+                    count = message_ids.len(),
+                    user = user.mention(),
+                    channel = channel_id.mention(),
+                })
+                .components(vec![CreateActionRow::Buttons(vec![
+                    CreateButton::new(&confirm_id)
+                        .label("Confirm")
+                        .style(ButtonStyle::Danger),
+                    CreateButton::new(&cancel_id)
+                        .label("Cancel")
+                        .style(ButtonStyle::Secondary),
+                ])]),
+        )
+        .await?;
+
+    let message_id = reply.message().await?.id;
+
+    let press = ComponentInteractionCollector::new(ctx.serenity_context())
+        .author_id(ctx.author().id)
+        .channel_id(channel_id)
+        .message_id(message_id)
+        .timeout(CONFIRMATION_TIMEOUT)
+        .await;
+
+    let Some(press) = press else {
+        reply
+            .edit(
+                ctx,
+                poise::CreateReply::default()
+                    .content("Timed out, no messages were deleted.")
+                    .components(vec![]),
+            )
+            .await?;
+        return Ok(());
+    };
+
+    if press.data.custom_id == cancel_id {
+        press
+            .create_response(
+                ctx.http(),
+                CreateInteractionResponse::UpdateMessage(
+                    CreateInteractionResponseMessage::new()
+                        .content("Cancelled, no messages were deleted.")
+                        .components(vec![]),
+                ),
+            )
+            .await?;
+        return Ok(());
+    }
+
+    press
+        .create_response(
+            ctx.http(),
+            CreateInteractionResponse::UpdateMessage(
+                CreateInteractionResponseMessage::new()
+                    .content(format!("Deleting {} message(s)...", message_ids.len()))
+                    .components(vec![]),
+            ),
+        )
+        .await?;
+
+    // Avoid racing a scheduled cleanup task for the same channel
+    let cancel_token = {
+        let mut registry = ctx.data().cancellation.lock().unwrap();
+        if registry.is_running(channel_id) {
+            None
+        } else {
+            Some(registry.register(channel_id))
+        }
+    };
+
+    let Some(cancel_token) = cancel_token else {
+        press
+            .edit_response(
+                ctx.http(),
+                EditInteractionResponse::new().content(
+                    "A cleanup task is already running for this channel, try again shortly.",
+                ),
+            )
+            .await?;
+        return Ok(());
+    };
+
+    let jobs: Vec<DeleteJob> = message_ids
+        .into_iter()
+        .map(|message_id| DeleteJob { message_id })
+        .collect();
+    let delete_result = delete_messages(ctx.http(), channel_id, &jobs, &cancel_token).await;
+
+    ctx.data()
+        .cancellation
+        .lock()
+        .unwrap()
+        .deregister(channel_id);
+
+    delete_result?;
+
+    press
+        .edit_response(
+            ctx.http(),
+            EditInteractionResponse::new().content(format!(
+                "Deleted {} message(s) from {}.",
+                jobs.len(),
+                user.mention()
+            )),
+        )
+        .await?;
+
     Ok(())
 }
